@@ -1,28 +1,14 @@
 from machine import Pin
-from urandom import getrandbits
 import time
 import json
 import urequests as requests
 import wifi_connect
+import mfrc522
+import config
 
 
 # Many ESP8266 boards have active-low "flash" button on GPIO0.
-button = Pin(0, Pin.IN)
-led = Pin(2, Pin.OUT)
-
-TOKENS = [
-    "2c3a555b-01cb-4636-ab65-ad38e0aa706b",
-    "5f44f87d-197f-4cf1-aa8b-fd622a8992c3",
-    "1936e081-689a-45f2-bf93-a01232c5a9e5",
-    "d75c5f40-26bb-41f3-8059-c88ac8b6eb31"
-]
-
-# TODO: get constants from config file
-URL = "http://192.168.1.34:5000/api/v1/pay"
-
-HEADERS = {
-    'content-type': 'application/json'
-}
+# button = Pin(0, Pin.IN)
 
 
 def toggle_led(led):
@@ -32,47 +18,85 @@ def toggle_led(led):
     led.value(not led.value())
 
 
+def format_uid(raw_uid):
+    """
+    Format UID of RFID tag (list of integers -> hex)
+    """
+    # '{:02x}{:02x}{:02x}{:02x}'.format(*raw_uid[:4]).upper()
+    return '{:02x}-{:02x}-{:02x}-{:02x}'.format(*raw_uid[:4])
+
+
+def read_rfid(reader):
+    """
+    Read UID of RFID tag
+    """
+    status, _ = reader.request(reader.REQIDL)
+
+    if status == reader.OK:
+        status, raw_uid = reader.anticoll()
+
+        if status == reader.OK:
+            print("Card detected...")
+            # print("Raw UID: {}".format(raw_uid))
+            uid = format_uid(raw_uid)
+
+            print("UID: {}".format(uid))
+
+            return uid
+
+    else:
+        return False
+
+
 def main():
     """
     Main loop
     """
-    print("Main loop started...")
-
-    # connec to wifi network
-    # TODO: move to boot.py ?
+    # connect to wifi network
+    # TODO: move to boot.py? UPD: some issues w/ boot.py
     wifi_connect.connect()
 
+    READER = mfrc522.MFRC522(0, 2, 4, 5, 14)
+
+    LED = Pin(2, Pin.OUT)
+    REGISTRATION_MODE = Pin(12, Pin.IN, Pin.PULL_UP)
+    REFILL_MODE = Pin(13, Pin.IN, Pin.PULL_UP)
+
+    print("Main loop started...")
     while True:
-        # button loop
+        # RFID tag loop
         while True:
-            # wait for button click
-            if button.value() == 0:
+            # wait for RFID tag
+            tag_uid = read_rfid(READER)
+
+            if tag_uid:
                 break
 
             # ready to accept payment (LED is on)
-            led.off()
-
-            time.sleep_ms(20)
+            LED.off()
+            time.sleep_ms(200)
 
         # processing (LED off)
-        toggle_led(led)
+        toggle_led(LED)
 
-        print("Button pressed. Sending request...")
+        print("Tag detected. Sending request...")
 
-        r = requests.post(URL,
-                          data=json.dumps({'uid': TOKENS[getrandbits(2)]}),
-                          headers=HEADERS)
+        data = {'uid': tag_uid}
+
+        if not REGISTRATION_MODE.value():
+            url = config.REGISTRATION_URL
+        elif not REFILL_MODE.value():
+            url = config.REFILL_URL
+            data.update({"trips": config.DEFAULT_REFILL_NUMBER})
+        else:
+            url = config.PAYMENT_URL
+
+        r = requests.post(url,
+                          data=json.dumps(data),
+                          headers=config.HEADERS)
 
         print("Response status: {}".format(r.status_code))
         print("Response data: {}".format(r.json()))
-
-        if r.status_code != 200:
-            print("Error")
-            print(r.json())
-
-        else:
-            print("Success")
-            print(r.json())
 
         # It's mandatory to close response objects as soon as you finished
         # working with them. On MicroPython platforms without full-fledged
@@ -81,7 +105,6 @@ def main():
 
         # time.sleep_ms(200)
         time.sleep(3)
-
 
 
 if __name__ == "__main__":

@@ -28,3 +28,27 @@ def read_uid():
 
     except KeyboardInterrupt:
         print("Bye")
+
+
+
+def read_rfid(reader):
+    status, _ = reader.request(reader.REQIDL)
+
+    if status == reader.OK:
+
+        stat, raw_uid = reader.anticoll()
+
+        if stat == reader.OK:
+            print("Card detected...")
+            print("RAW_UID: {}".format(raw_uid))
+
+            uid = '{:02x}{:02x}{:02x}{:02x}'.format(*raw_uid[:4]).upper()
+
+            print("UID: {}".format(uid))
+            print("")
+
+
+
+
+
+
