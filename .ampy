@@ -1,4 +1,5 @@
-AMPY_PORT=/dev/tty.wchusbserial1420
+# AMPY_PORT=/dev/tty.wchusbserial1420
+AMPY_PORT=/dev/tty.wchusbserial1410
 AMPY_BAUD=115200
 # Fix for macOS users' "Could not enter raw repl"; try 2.0 and lower from there:
 AMPY_DELAY=2.0
