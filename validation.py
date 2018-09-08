@@ -39,7 +39,7 @@ class Token:
     @classmethod
     def hexlify(data):
         """
-        Convert bytes (or list of integers) to hexadecimal string
+        Convert bytes to hexadecimal string
         """
         if isinstance(data, list):
             data = bytes(data)
@@ -81,29 +81,25 @@ def read_uid(reader):
     else:
         return False
 
-# TODO: OOP
-def write_data(reader, raw_uid, data):
-    """
-    Write data to card (address 0x08)
-    """
-    if reader.select_tag(raw_uid) == reader.OK:
-        if reader.auth(reader.AUTHENT1A, 8, KEY, raw_uid) == reader.OK:
-            status = reader.write(8, data)
-            reader.stop_crypto1()
 
-            # possible issue
-            if status == reader.OK:
-                print("Data written to card: {}".format(data))
-            else:
-                print("Failed to write data to card")
-        else:
-            print("Authentication error")
-    else:
-        print("Failed to select tag")
+# def read_data(reader):
+#     """
+#     Read data from card (address 0x08)
+#     """
+#     if reader.select_tag(raw_uid) == reader.OK:
+#         if reader.auth(reader.AUTHENT1A, 8, KEY, raw_uid) == reader.OK:
+#             data = reader.read(8)
+#             reader.stop_crypto1()
+
+#             return data
+
+#         print("Authentication error")
+
+#     print("Failed to select tag")
+#     return
 
 
-
-def main():
+def validate():
     """
     Main loop
     """
@@ -115,8 +111,6 @@ def main():
     READER = mfrc522.MFRC522(0, 2, 4, 5, 14)
 
     LED = Pin(2, Pin.OUT)
-    REGISTRATION_MODE = Pin(12, Pin.IN, Pin.PULL_UP)
-    REFILL_MODE = Pin(13, Pin.IN, Pin.PULL_UP)
     VEHICLE_UID = '1112'
 
     print("Main loop started...")
@@ -127,10 +121,6 @@ def main():
             tag_raw_uid = read_uid(READER)
 
             if tag_raw_uid:
-                transaction_id = Token()
-
-                write_data(READER, tag_raw_uid, transaction_id.token)
-                time.sleep(1)
                 break
 
             # ready to accept payment (LED is on)
@@ -143,22 +133,12 @@ def main():
         print("Tag detected. Sending request...")
 
         tag_uid = format_uid(tag_raw_uid)
-        data = {'ticket_uid': tag_uid}
-
-        if not REGISTRATION_MODE.value():
-            url = config.REGISTRATION_URL
-        elif not REFILL_MODE.value():
-            url = config.REFILL_URL
-        else:
-            url = config.PAYMENT_URL
-            data.update({'vehicle_uid': VEHICLE_UID,
-                         'transaction_uid': transaction_id.hex_token})
-
+        data = {'ticket_uid': tag_uid, 'vehicle_uid': VEHICLE_UID}
 
         try:
             print("Request data: {}".format(data))
 
-            r = requests.post(url,
+            r = requests.post(url=config.VALIDATION_URL,
                               data=json.dumps(data),
                               headers=config.HEADERS)
 
@@ -169,7 +149,8 @@ def main():
             # working with them. On MicroPython platforms without full-fledged
             # OS, not doing so may lead to resource leaks and malfunction.
             r.close()
-        except:
+        except Exception as e:
+            print(e)
             print("Failed to send request")
 
         # time.sleep_ms(200)
