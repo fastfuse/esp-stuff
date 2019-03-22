@@ -6,6 +6,8 @@ import network
 import ubinascii
 from umqtt.simple import MQTTClient
 
+import BlynkLib
+
 
 INTERNAL_LED = 2
 DHT_DATA = 16
@@ -16,6 +18,8 @@ TOPIC_TEMP_HUM = b"lwo/iot/temp_hum"
 
 # Uniq client ID
 CLIENT_ID = ubinascii.hexlify(machine.unique_id())
+
+BLYNK_AUTH = 'd0f353a80b484ab5b9cf72b2b967db5c'
 
 
 # TODO: add logging
@@ -60,30 +64,50 @@ def main():
 
     wlan_connect()
 
-    led = Pin(INTERNAL_LED, Pin.OUT, value=1)
+    import BlynkLib
 
-
-    # TODO: subclass and add context manager
-    client = MQTTClient(CLIENT_ID, MQTT_SERVER)
-
-
+    led = Pin(INTERNAL_LED, Pin.OUT, value=0)
     dht_sensor = dht.DHT22(Pin(DHT_DATA))
 
-    while True:
+
+    # Initialize Blynk
+    blynk = BlynkLib.Blynk(BLYNK_AUTH)
+
+    # Register Virtual Pins
+    @blynk.VIRTUAL_WRITE(1)
+    def my_write_handler(value):
+        print('Current V1 value: {}'.format(value))
         toggle_led(led)
 
+    # @blynk.VIRTUAL_WRITE(2)
+    # def my_write_handler(value):
+    #     print('Current V1 value: {}'.format(value))
+        # toggle_led(led)
+
+    @blynk.VIRTUAL_READ(2)
+    def my_read_handler():
+        # this widget will show some time in seconds..
         dht_sensor.measure()
+        temp = dht_sensor.temperature()
+        hum = dht_sensor.humidity()
 
-        data = json.dumps({"temperature": dht_sensor.temperature(),
-                           "humidity": dht_sensor.humidity()})
+        blynk.virtual_write(2, temp)
+        blynk.virtual_write(3, hum)
 
-        client.connect()
-        client.publish(TOPIC_TEMP_HUM, data.encode())
-        client.disconnect()
 
-        toggle_led(led)
+    while True:
+        blynk.run()
 
-        time.sleep(2)
+    # dht_sensor = dht.DHT22(Pin(DHT_DATA))
+
+    # while True:
+    #     # toggle_led(led)
+
+    #     dht_sensor.measure()
+
+    #     toggle_led(led)
+
+    #     time.sleep(4)
 
 
 
