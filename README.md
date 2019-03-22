@@ -6,6 +6,13 @@
 * [ampy](https://github.com/adafruit/ampy)
 
 
+#### Enter REPL:
+
+    ```sh
+    $> screen /dev/tty-port 115200
+    ```
+
+
 #### Workflow:
 
 * Write Python code on your computer using your favorite text editor.
@@ -20,7 +27,7 @@
 
 * Edit and run the script as much as you need for it to work the way you expect.
 
-* When you want the code to automatically run on boot use the `ampy put` command to save the script as a `/main.py` file on the board:
+* When you want the code to automatically run on boot use the `ampy put` command to save the script as `/main.py` file on the board:
 
     ```sh
     $> ampy --port /dev/tty-port put test.py /main.py
