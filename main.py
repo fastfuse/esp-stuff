@@ -1,49 +1,18 @@
 from machine import Pin
-import ubinascii
 import time
-import os
+import dht
 import json
-import urequests as requests
-import wifi_connect
-import mfrc522
-import config
+import network
+import ubinascii
+from umqtt.simple import MQTTClient
+
+import BlynkLib
 
 
-KEY = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+INTERNAL_LED = 2
+DHT_DATA = 16
 
-# Many ESP8266 boards have active-low "flash" button on GPIO0.
-# button = Pin(0, Pin.IN)
-
-
-class Token:
-    """
-    Helper class to work with bytes/hex repr of os.urandom string
-    """
-    def __init__(self, bytes_=16):
-        self._token = os.urandom(bytes_)
-
-    @property
-    def token(self):
-        """
-        Token as bytes
-        """
-        return self._token
-
-    @property
-    def hex_token(self):
-        """
-        Token as hexadecimal string
-        """
-        return self.hexlify(self._token).decode()
-
-    @classmethod
-    def hexlify(data):
-        """
-        Convert bytes (or list of integers) to hexadecimal string
-        """
-        if isinstance(data, list):
-            data = bytes(data)
-        return ubinascii.hexlify(data).decode()
+BLYNK_AUTH = 'd0f353a80b484ab5b9cf72b2b967db5c'
 
 
 def toggle_led(led):
@@ -53,128 +22,64 @@ def toggle_led(led):
     led.value(not led.value())
 
 
-def format_uid(raw_uid):
+def wlan_connect():
     """
-    Format UID of RFID tag (list of integers -> hex)
+    Connect to WIFI network
     """
-    # '{:02x}{:02x}{:02x}{:02x}'.format(*raw_uid[:4]).upper()
-    return '{:02x}-{:02x}-{:02x}-{:02x}'.format(*raw_uid[:4])
+    sta_if = network.WLAN(network.STA_IF)
+    ap_if = network.WLAN(network.AP_IF)
 
-# TODO: OOP
-def read_uid(reader):
-    """
-    Read UID of RFID tag
-    """
-    status, _ = reader.request(reader.REQIDL)
+    with open('wlan') as wlan_creds:
+        ssid, pswd = [line.strip() for line in wlan_creds.readlines()]
 
-    if status == reader.OK:
-        status, raw_uid = reader.anticoll()
+    if not sta_if.isconnected():
+        print('Connecting to network...')
 
-        if status == reader.OK:
-            print("Card detected...")
-            print("Raw UID: {}".format(raw_uid))
-            # uid = format_uid(raw_uid)
-            # print("UID: {}".format(uid))
+        sta_if.active(True)
+        sta_if.connect(ssid, pswd)
 
-            return raw_uid
+        while not sta_if.isconnected():
+            pass
 
-    else:
-        return False
+    ap_if.active(False)
 
-# TODO: OOP
-def write_data(reader, raw_uid, data):
-    """
-    Write data to card (address 0x08)
-    """
-    if reader.select_tag(raw_uid) == reader.OK:
-        if reader.auth(reader.AUTHENT1A, 8, KEY, raw_uid) == reader.OK:
-            status = reader.write(8, data)
-            reader.stop_crypto1()
-
-            # possible issue
-            if status == reader.OK:
-                print("Data written to card: {}".format(data))
-            else:
-                print("Failed to write data to card")
-        else:
-            print("Authentication error")
-    else:
-        print("Failed to select tag")
-
+    print('Connected. Network config:', sta_if.ifconfig())
 
 
 def main():
     """
     Main loop
     """
-    # connect to wifi network
-    # TODO: move to boot.py?
-    # UPD: some issues w/ boot.py
-    wifi_connect.connect()
 
-    READER = mfrc522.MFRC522(0, 2, 4, 5, 14)
+    # connect to wifi
+    wlan_connect()
 
-    LED = Pin(2, Pin.OUT)
-    REGISTRATION_MODE = Pin(12, Pin.IN, Pin.PULL_UP)
-    REFILL_MODE = Pin(13, Pin.IN, Pin.PULL_UP)
-    VEHICLE_UID = '1112'
+    led = Pin(INTERNAL_LED, Pin.OUT)
+    dht_sensor = dht.DHT22(Pin(DHT_DATA))
 
-    print("Main loop started...")
+    # Initialize Blynk
+    blynk = BlynkLib.Blynk(BLYNK_AUTH)
+
+    # Register Virtual Pins
+    @blynk.VIRTUAL_WRITE(1)
+    def button_handler(value):
+        # blynk.virtual_write(4, value)
+        led.value(int(value[0]))
+
+
+    @blynk.VIRTUAL_READ(2)
+    def temp_hum_handler():
+        dht_sensor.measure()
+        temp = dht_sensor.temperature()
+        hum = dht_sensor.humidity()
+
+        blynk.virtual_write(2, temp)
+        blynk.virtual_write(3, hum)
+
+
     while True:
-        # RFID tag loop
-        while True:
-            # wait for RFID tag
-            tag_raw_uid = read_uid(READER)
-
-            if tag_raw_uid:
-                transaction_id = Token()
-
-                write_data(READER, tag_raw_uid, transaction_id.token)
-                time.sleep(1)
-                break
-
-            # ready to accept payment (LED is on)
-            LED.off()
-            time.sleep_ms(200)
-
-        # processing (LED off)
-        toggle_led(LED)
-
-        print("Tag detected. Sending request...")
-
-        tag_uid = format_uid(tag_raw_uid)
-        data = {'ticket_uid': tag_uid}
-
-        if not REGISTRATION_MODE.value():
-            url = config.REGISTRATION_URL
-        elif not REFILL_MODE.value():
-            url = config.REFILL_URL
-        else:
-            url = config.PAYMENT_URL
-            data.update({'vehicle_uid': VEHICLE_UID,
-                         'transaction_uid': transaction_id.hex_token})
+        blynk.run()
 
 
-        try:
-            print("Request data: {}".format(data))
-
-            r = requests.post(url,
-                              data=json.dumps(data),
-                              headers=config.HEADERS)
-
-            print("Response status: {}".format(r.status_code))
-            print("Response data: {}".format(r.json()))
-
-            # It's mandatory to close response objects as soon as you finished
-            # working with them. On MicroPython platforms without full-fledged
-            # OS, not doing so may lead to resource leaks and malfunction.
-            r.close()
-        except:
-            print("Failed to send request")
-
-        # time.sleep_ms(200)
-        time.sleep(3)
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
